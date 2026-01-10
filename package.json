@@ -1,16 +1,34 @@
 {
-    "name": "micropython-microserver",
     "version": "0.1.0",
-    "description": "Minimal HTTP/WebSocket microserver for MicroPython (mip manifest-driven)",
-    "license": "MIT",
-    "main": "main.py",
-    "files": [
-        "manifest.py",
-        "microserver.py",
-        "http.py",
-        "middleware.py",
-        "utils.py",
-        "websocket.py",
-        "main.py"
+    "deps": [],
+    "urls": [
+        [
+            "manifest.py",
+            "github:nicolasmmb/MicroServer/manifest.py"
+        ],
+        [
+            "microserver.py",
+            "github:nicolasmmb/MicroServer/microserver.py"
+        ],
+        [
+            "http.py",
+            "github:nicolasmmb/MicroServer/http.py"
+        ],
+        [
+            "middleware.py",
+            "github:nicolasmmb/MicroServer/middleware.py"
+        ],
+        [
+            "utils.py",
+            "github:nicolasmmb/MicroServer/utils.py"
+        ],
+        [
+            "websocket.py",
+            "github:nicolasmmb/MicroServer/websocket.py"
+        ],
+        [
+            "main.py",
+            "github:nicolasmmb/MicroServer/main.py"
+        ]
     ]
 }
