@@ -166,6 +166,10 @@ class MicroServer:
                     res = await handler(request)
                     if isinstance(res, Response):
                         return res
+                    if hasattr(res, "__aiter__"):
+                        return Response(res)
+                    if hasattr(res, "__iter__") and hasattr(res, "__next__"):
+                        return Response(res)
                     if isinstance(res, (dict, list)):
                         return Response(json.dumps(res))
                     return Response(str(res), content_type="text/html")
@@ -230,6 +234,8 @@ class MicroServer:
 
     async def _write_chunk(self, writer, chunk):
         if chunk:
+            if isinstance(chunk, str):
+                chunk = chunk.encode()
             writer.write(f"{len(chunk):x}\r\n".encode())
             writer.write(chunk)
             writer.write(b"\r\n")
