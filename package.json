@@ -1,0 +1,16 @@
+{
+    "name": "micropython-microserver",
+    "version": "0.1.0",
+    "description": "Minimal HTTP/WebSocket microserver for MicroPython (mip manifest-driven)",
+    "license": "MIT",
+    "main": "main.py",
+    "files": [
+        "manifest.py",
+        "microserver.py",
+        "http.py",
+        "middleware.py",
+        "utils.py",
+        "websocket.py",
+        "main.py"
+    ]
+}
