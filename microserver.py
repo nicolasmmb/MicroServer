@@ -61,9 +61,10 @@ class MicroServer:
                 return Response("Forbidden", 403, content_type="text/plain")
             try:
                 os.stat(file_path)
-                return self.send_file(file_path)
             except OSError:
                 return Response("Not Found", 404, content_type="text/plain")
+
+            return self.send_file(file_path)
 
         self.route(url_path, methods=["GET"])(static_handler)
 
@@ -90,9 +91,11 @@ class MicroServer:
             line = await asyncio.wait_for(reader.readline(), 5)
             if not line:
                 return
+
             parts = line.decode().strip().split()
             if len(parts) < 2:
                 return
+
             method, path = parts[0].upper(), unquote(parts[1])
 
             headers = {}
@@ -100,28 +103,30 @@ class MicroServer:
                 h_line = await asyncio.wait_for(reader.readline(), 2)
                 if not h_line or h_line == b"\r\n":
                     break
-                if b":" in h_line:
-                    k, v = h_line.decode().strip().split(":", 1)
-                    headers[k.lower()] = v.strip()
+                if b":" not in h_line:
+                    continue
+                k, v = h_line.decode().strip().split(":", 1)
+                headers[k.lower()] = v.strip()
 
             if (
                 headers.get("upgrade", "").lower() == "websocket"
                 and path in self.ws_routes
             ):
                 ws = WebSocket(reader, writer)
-                if await ws.accept(headers):
-                    self.logger.log(f"WS Connect: {path}")
-                    try:
-                        await self.ws_routes[path](ws)
-                    except Exception as e:
-                        self.logger.log(f"WS Error: {e}", "ERROR")
-                else:
+                if not await ws.accept(headers):
                     await self._send_response(
                         writer,
                         Response(
                             "Bad WebSocket handshake", 400, content_type="text/plain"
                         ),
                     )
+                    return
+
+                self.logger.log(f"WS Connect: {path}")
+                try:
+                    await self.ws_routes[path](ws)
+                except Exception as e:
+                    self.logger.log(f"WS Error: {e}", "ERROR")
                 return
 
             cl_header = headers.get("content-length")
@@ -151,30 +156,31 @@ class MicroServer:
             async def dispatch(request):
                 handler = None
                 for r_path, r_methods, r_handler in self.routes:
-                    if request.method in r_methods:
-                        if r_path == request.path:
-                            handler = r_handler
-                            break
-                        elif (
-                            "static_handler" in r_handler.__name__
-                            and request.path.startswith(r_path)
-                        ):
-                            handler = r_handler
-                            break
+                    if request.method not in r_methods:
+                        continue
+                    if r_path == request.path:
+                        handler = r_handler
+                        break
+                    if (
+                        "static_handler" in r_handler.__name__
+                        and request.path.startswith(r_path)
+                    ):
+                        handler = r_handler
+                        break
 
-                if handler:
-                    res = await handler(request)
-                    if isinstance(res, Response):
-                        return res
-                    if hasattr(res, "__aiter__"):
-                        return Response(res)
-                    if hasattr(res, "__iter__") and hasattr(res, "__next__"):
-                        return Response(res)
-                    if isinstance(res, (dict, list)):
-                        return Response(json.dumps(res))
-                    return Response(str(res), content_type="text/html")
+                if handler is None:
+                    return Response('{"error": "Not Found"}', 404)
 
-                return Response('{"error": "Not Found"}', 404)
+                res = await handler(request)
+                if isinstance(res, Response):
+                    return res
+                if hasattr(res, "__aiter__"):
+                    return Response(res)
+                if hasattr(res, "__iter__") and hasattr(res, "__next__"):
+                    return Response(res)
+                if isinstance(res, (dict, list)):
+                    return Response(json.dumps(res))
+                return Response(str(res), content_type="text/html")
 
             handler_chain = dispatch
             for mw in reversed(self.middlewares):
