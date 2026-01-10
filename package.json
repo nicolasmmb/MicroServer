@@ -3,31 +3,31 @@
     "deps": [],
     "urls": [
         [
-            "MicroServer/manifest.py",
+            "microserver/manifest.py",
             "github:nicolasmmb/MicroServer/manifest.py"
         ],
         [
-            "MicroServer/microserver.py",
+            "microserver/microserver.py",
             "github:nicolasmmb/MicroServer/microserver.py"
         ],
         [
-            "MicroServer/http.py",
+            "microserver/http.py",
             "github:nicolasmmb/MicroServer/http.py"
         ],
         [
-            "MicroServer/middleware.py",
+            "microserver/middleware.py",
             "github:nicolasmmb/MicroServer/middleware.py"
         ],
         [
-            "MicroServer/utils.py",
+            "microserver/utils.py",
             "github:nicolasmmb/MicroServer/utils.py"
         ],
         [
-            "MicroServer/websocket.py",
+            "microserver/websocket.py",
             "github:nicolasmmb/MicroServer/websocket.py"
         ],
         [
-            "MicroServer/main.py",
+            "microserver/main.py",
             "github:nicolasmmb/MicroServer/main.py"
         ]
     ]
