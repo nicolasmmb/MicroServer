@@ -11,7 +11,7 @@ class WebSocket:
         self.closed = False
         self.lock = asyncio.Lock()
 
-    async def accept(self, headers):
+    async def accept(self, headers: dict) -> bool:
         """Realiza o handshake do WebSocket."""
         key = headers.get("sec-websocket-key", "")
         if not key:

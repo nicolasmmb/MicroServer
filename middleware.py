@@ -1,64 +1,94 @@
 import time
-from utils import Logger
+from utils import Logger, ConsoleLogger
 from http import Response
 
 
 class CORSMiddleware:
-    def __init__(self, origins="*", methods="*", headers="*", allow_credentials=False):
-        self.origins = origins
-        self.methods = methods
-        self.headers = headers
-        self.allow_credentials = allow_credentials
+    def __init__(
+        self,
+        origins: str = "*",
+        methods: str = "*",
+        headers: str = "*",
+        allow_credentials: bool = False,
+    ):
+        # Pre-calculate headers to avoid dictionary creation on every request
+        self.cors_headers = {
+            "Access-Control-Allow-Origin": origins,
+            "Access-Control-Allow-Methods": methods,
+            "Access-Control-Allow-Headers": headers,
+        }
+
+        if allow_credentials:
+            self.cors_headers["Access-Control-Allow-Credentials"] = "true"
+
+        # Cache the OPTIONS response entirely since it never changes
+        # This saves memory allocation on every preflight request
+        self._options_response = Response("", 204)
+        self._options_response.headers.update(self.cors_headers)
 
     async def __call__(self, request, next_handler):
+        # Fast path for preflight requests
         if request.method == "OPTIONS":
-            response = Response("", 204)
-            self._add_headers(response)
-            return response
+            return self._options_response
 
+        # Process request
         response = await next_handler(request)
-        self._add_headers(response)
-        return response
 
-    def _add_headers(self, response):
-        response.add_header("Access-Control-Allow-Origin", self.origins)
-        response.add_header("Access-Control-Allow-Methods", self.methods)
-        response.add_header("Access-Control-Allow-Headers", self.headers)
-        if self.allow_credentials:
-            response.add_header("Access-Control-Allow-Credentials", "true")
+        # Merge CORS headers into the response headers
+        # .update() is generally implemented efficiently in C for MicroPython
+        response.headers.update(self.cors_headers)
+        return response
 
 
 class LoggingMiddleware:
-    """Middleware para log detalhado de requisições: Data, IP, Método, Path, Status, Tempo."""
+    """Middleware for detailed request logging: Date, IP, Method, Path, Status, Duration."""
 
-    def __init__(self):
-        self.logger = Logger(enabled=True)
-
-    def _fmt_duration(self, us):
-        """Formata microsegundos para unidade mais apropriada (us, ms, s, min, h)."""
-        if us < 1000:
-            return f"{int(us)}us"
-        elif us < 1000000:
-            return f"{us / 1000:.3f}ms"
-        elif us < 60000000:
-            return f"{us / 1000000:.3f}s"
-        elif us < 3600000000:
-            return f"{us / 60000000:.2f}min"
-        else:
-            return f"{us / 3600000000:.2f}h"
+    def __init__(self, logger: Logger = None):
+        self.logger = logger or ConsoleLogger()
 
     async def __call__(self, request, next_handler):
-        start_time = time.ticks_us()
+        start = time.ticks_us()
         response = await next_handler(request)
-        duration_us = time.ticks_diff(time.ticks_us(), start_time)
-        time_str = self._fmt_duration(duration_us)
+        duration = time.ticks_diff(time.ticks_us(), start)
 
-        time_struct = time.localtime()
-        timestamp = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:{:02d}".format(
-            time_struct[2], time_struct[1], time_struct[0], time_struct[3], time_struct[4], time_struct[5]
+        # Format duration logic inline for performance
+        if duration < 1000:
+            time_str = f"{duration}us"
+        elif duration < 1000000:
+            time_str = f"{duration / 1000:.3f}ms"
+        else:
+            time_str = f"{duration / 1000000:.3f}s"
+
+        # Get simplified timestamp
+        # MicroPython returns 8-tuple, CPython returns 9-tuple. Slicing maintains compatibility.
+        y, m, d, H, M, S = time.localtime()[:6]
+
+        # f-string formatting is efficient in recent MicroPython versions
+        self.logger.log(
+            f"{d:02d}/{m:02d}/{y:04d} {H:02d}:{M:02d}:{S:02d} | "
+            f"{request.ip} | {request.method} {request.path} | "
+            f"{response.status} | {time_str}"
         )
 
-        log_msg = f"{timestamp} | {request.ip} | {request.method} {request.path} | {response.status} | {time_str}"
-
-        self.logger.log(log_msg)
         return response
+
+
+class MiddlewarePipeline:
+    def __init__(self, final_handler):
+        self.final_handler = final_handler
+        self.middlewares = []
+
+    def add(self, middleware):
+        self.middlewares.append(middleware)
+
+    def build(self):
+        chain = self.final_handler
+        for middleware in reversed(self.middlewares):
+            chain = self._wrap(middleware, chain)
+        return chain
+
+    def _wrap(self, middleware, next_handler):
+        async def wrapped_middleware(request):
+            return await middleware(request, next_handler)
+
+        return wrapped_middleware

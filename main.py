@@ -39,8 +39,9 @@ def connect_wifi():
 
 
 # Instancia o Servidor
-# 'logging': False desativa o log interno do MicroServer para não duplicar com o Middleware
-app = MicroServer(port=80, config={"logging": False, "max_body_size": 4096})
+# Logger customizado (opcional), aqui usamos o padrão (Console) mas poderíamos injetar um FileLogger
+# app = MicroServer(port=80, logger=FileLogger())
+app = MicroServer(port=80)
 
 # 1. Middleware de Log (Adicionado PRIMEIRO para englobar tudo)
 app.add_middleware(LoggingMiddleware())
@@ -107,7 +108,7 @@ async def ws_echo(ws):
             if msg is None:
                 break
             await ws.send(f"Echo: {msg}")
-        except:
+        except Exception:
             break
     print("Cliente WS desconectado")
 

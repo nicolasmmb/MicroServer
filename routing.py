@@ -2,7 +2,7 @@ class _StaticTrie:
     def __init__(self):
         self.root = {"h": None, "c": {}}
 
-    def add(self, prefix, handler):
+    def add(self, prefix: str, handler):
         node = self.root
         for part in self._parts(prefix):
             children = node["c"]
@@ -11,7 +11,7 @@ class _StaticTrie:
             node = children[part]
         node["h"] = handler
 
-    def match(self, path):
+    def match(self, path: str):
         node = self.root
         last_handler = None
         for part in self._parts(path):
@@ -23,7 +23,7 @@ class _StaticTrie:
                 last_handler = node["h"]
         return last_handler
 
-    def _parts(self, path):
+    def _parts(self, path: str) -> list:
         if not path or path == "/":
             return []
         if path[0] == "/":
@@ -37,7 +37,7 @@ class _RouteTrie:
     def __init__(self):
         self.root = {"h": None, "c": {}, "p": None, "pn": None}
 
-    def add(self, pattern, handler):
+    def add(self, pattern: str, handler):
         node = self.root
         for part in self._parts(pattern):
             if part.startswith("<") and part.endswith(">"):
@@ -53,7 +53,7 @@ class _RouteTrie:
                 node = children[part]
         node["h"] = handler
 
-    def match(self, path):
+    def match(self, path: str):
         node = self.root
         params = {}
         for part in self._parts(path):
@@ -71,7 +71,7 @@ class _RouteTrie:
             return node["h"], params
         return None
 
-    def _parts(self, path):
+    def _parts(self, path: str) -> list:
         if not path or path == "/":
             return []
         if path[0] == "/":
@@ -81,15 +81,34 @@ class _RouteTrie:
         return path.split("/") if path else []
 
 
-class Router:
-    def __init__(self):
+class RouterInterface:
+    """Implementa o padrão Strategy para roteamento."""
+
+    def add(self, method: str, path: str, handler):
+        """Registra uma rota dinâmica ou exata."""
+        raise NotImplementedError
+
+    def add_static(self, url_path: str, handler):
+        """Registra uma rota de arquivos estáticos."""
+        raise NotImplementedError
+
+    def match(self, method: str, path: str):
+        """Retorna (handler, params) ou (None, None)."""
+        raise NotImplementedError
+
+
+class Router(RouterInterface):
+    def __init__(self, not_found_cache_size=50):
         self.route_map = {}
         self.static_routes = []
         self._static_trie = _StaticTrie()
         self._dyn_tries = {}
-        self._not_found_cache = set()
 
-    def add(self, method, path, handler):
+        # Proteção OOM: Cache limitado
+        self._not_found_cache = set()
+        self._cache_size = not_found_cache_size
+
+    def add(self, method: str, path: str, handler):
         if "<" in path and ">" in path:
             trie = self._dyn_tries.get(method)
             if trie is None:
@@ -99,21 +118,36 @@ class Router:
         else:
             self.route_map[(method, path)] = handler
 
-    def add_static(self, url_path, handler):
+    def add_static(self, url_path: str, handler):
         self.static_routes.append((url_path, handler))
         self._static_trie.add(url_path, handler)
 
-    def match(self, method, path):
-        # 1. Exact match
-        handler = self.route_map.get((method, path))
-        params = {}
-        
+    def match(self, method: str, path: str):
+        # 1. Checagem rápida no cache de 404 (Proteção de CPU)
+        if path in self._not_found_cache:
+            return None, None
+
+        handler, params = self._internal_match(method, path)
         if handler:
             return handler, params
 
-        # 2. Check 404 cache
-        if path in self._not_found_cache:
-            return None, None
+        # Not found - Adiciona ao cache com proteção de Memória
+        if len(self._not_found_cache) >= self._cache_size:
+            # Estratégia simples: remove um arbitrário
+            try:
+                self._not_found_cache.pop()
+            except KeyError:
+                pass
+
+        self._not_found_cache.add(path)
+        return None, None
+
+    def _internal_match(self, method: str, path: str):
+        # 2. Exact match
+        handler = self.route_map.get((method, path))
+        params = {}
+        if handler:
+            return handler, params
 
         # 3. Static match
         handler = self._static_trie.match(path)
@@ -125,9 +159,6 @@ class Router:
         if trie is not None:
             matched = trie.match(path)
             if matched is not None:
-                handler, params = matched
-                return handler, params
+                return matched
 
-        # 5. Not found
-        self._not_found_cache.add(path)
         return None, None

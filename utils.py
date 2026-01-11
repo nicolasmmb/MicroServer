@@ -8,34 +8,54 @@ CHUNK_SIZE = const(512)
 
 
 class Logger:
-    """Sistema de logging minimalista com rotação de arquivo."""
+    """Interface (Strategy) base para loggers."""
 
-    def __init__(self, enabled=True, filepath="api.log", max_size=5120):
-        self.enabled = enabled
+    def log(self, msg: str, level: str = "INFO"):
+        raise NotImplementedError
+
+
+class ConsoleLogger(Logger):
+    """Implementação simples de logger para console."""
+
+    def log(self, msg: str, level: str = "INFO"):
+        print(f"[{level}] {msg}")
+
+
+class FileLogger(Logger):
+    """Implementação de logger com rotação de arquivo e segurança de I/O."""
+
+    def __init__(self, filepath: str = "api.log", max_size: int = 10240):
         self.filepath = filepath
         self.max_size = max_size
 
-    def log(self, msg, level="INFO"):
-        if not self.enabled:
-            return
+    def log(self, msg: str, level: str = "INFO"):
         t = time.ticks_ms()
+        # Sempre imprime no console também para debug via serial
         print(f"[{level}] {msg}")
 
-        if self.filepath:
+        # Escrita segura em arquivo com rotação
+        try:
             try:
-                try:
-                    if os.stat(self.filepath)[6] > self.max_size:
-                        os.remove(self.filepath)
-                except OSError:
-                    pass
+                if os.stat(self.filepath)[6] > self.max_size:
+                    os.remove(self.filepath)
+            except OSError:
+                pass  # Arquivo não existe ainda
 
-                with open(self.filepath, "a") as f:
-                    f.write(f"[{t}] [{level}] {msg}\n")
-            except Exception:
-                pass
+            with open(self.filepath, "a") as f:
+                f.write(f"[{t}] [{level}] {msg}\n")
+        except Exception:
+            # Falha silenciosa em I/O é preferível a crashar o servidor
+            pass
 
 
-def unquote(string):
+class NoOpLogger(Logger):
+    """Logger silencioso (Null Object Pattern)."""
+
+    def log(self, msg: str, level: str = "INFO"):
+        pass
+
+
+def unquote(string: str) -> str:
     """Decodifica URL encoding (ex: %20 -> espaço)."""
     if not string:
         return ""
@@ -51,7 +71,7 @@ def unquote(string):
     return s
 
 
-def get_mime_type(filename):
+def get_mime_type(filename: str) -> str:
     """Retorna Content-Type baseado na extensão."""
     ext = filename.split(".")[-1].lower()
     mimes = {

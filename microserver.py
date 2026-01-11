@@ -1,48 +1,34 @@
 import sys
-import json
-import os
 import uasyncio as asyncio
+from http import Request, Response, _PHRASES
+from routing import Router
+from utils import Logger, ConsoleLogger, unquote, get_mime_type
+from middleware import MiddlewarePipeline
+from websocket import WebSocket
+
+# Constantes compartilhadas
 from micropython import const
 
+CHUNK_SIZE = const(512)
+_READLINE_TIMEOUT = const(2)
+_HEADER_TIMEOUT = const(2)
 
-from http import Request, Response
-from websocket import WebSocket
-from utils import CHUNK_SIZE, Logger, get_mime_type, unquote
-
-
-_DEFAULT_MAX_BODY_SIZE = const(10240)
-_DEFAULT_MAX_CONNS = const(4)
-_READLINE_TIMEOUT = const(5)  # seconds
-_HEADER_TIMEOUT = const(2)  # seconds
-_PHRASES = {
-    200: "OK",
-    204: "No Content",
-    400: "Bad Request",
-    404: "Not Found",
-    413: "Payload Too Large",
-    500: "Internal Server Error",
-}
-
-
-from routing import Router
 
 class MicroServer:
-    def __init__(self, port=80, config=None):
+    def __init__(self, port: int = 80, logger: Logger = None, router=None):
         self.port = port
-        self.config = config or {}
-        self.router = Router()
-        self.ws_routes = {}
+        self.logger = logger or ConsoleLogger()
+        self.router = router or Router()
         self.middlewares = []
-        self.logger = Logger(enabled=self.config.get("logging", True))
         self.conns = 0
-        self.max_conns = self.config.get("max_conns", _DEFAULT_MAX_CONNS)
+        self.max_conns = 10
+        self.ws_routes = {}
+        self.max_body_size = 1024 * 1024  # 1MB limit for safety
 
     def add_middleware(self, middleware):
         self.middlewares.append(middleware)
 
-    def route(self, path, methods=None):
-        if methods is None:
-            methods = ("GET",)
+    def route(self, path, methods=["GET"]):
         def decorator(handler):
             for method in methods:
                 self.router.add(method, path, handler)
@@ -50,6 +36,7 @@ class MicroServer:
 
         return decorator
 
+    # Helpers RESTful
     def get(self, path):
         return self.route(path, methods=["GET"])
 
@@ -65,32 +52,38 @@ class MicroServer:
     def patch(self, path):
         return self.route(path, methods=["PATCH"])
 
-    def options(self, path):
-        return self.route(path, methods=["OPTIONS"])
+    def _build_pipeline(self):
+        """Constrói a cadeia de execução."""
+        pipeline = MiddlewarePipeline(self._dispatch_request)
+        for mw in self.middlewares:
+            pipeline.add(mw)
+        return pipeline.build()
 
-    def websocket(self, path):
+    def websocket(self, path: str):
         def decorator(handler):
             self.ws_routes[path] = handler
             return handler
 
         return decorator
 
-    def mount_static(self, url_path, dir_path):
+    def mount_static(self, url_path: str, dir_path: str):
+        import os
+
         async def static_handler(request):
             file_path = request.path.replace(url_path, dir_path, 1)
             if ".." in file_path:
-                return Response("Forbidden", 403, content_type="text/plain")
+                return Response.plain("Forbidden", 403)
             try:
                 os.stat(file_path)
             except OSError:
-                return Response("Not Found", 404, content_type="text/plain")
+                return Response.plain("Not Found", 404)
 
             return self.send_file(file_path)
 
         self.route(url_path, methods=["GET"])(static_handler)
         self.router.add_static(url_path, static_handler)
 
-    def send_file(self, filename):
+    def send_file(self, filename: str):
         async def file_gen():
             with open(filename, "rb") as f:
                 while True:
@@ -99,13 +92,35 @@ class MicroServer:
                         break
                     yield data
 
-        return Response(file_gen(), content_type=get_mime_type(filename))
+        return Response.stream(file_gen(), content_type=get_mime_type(filename))
+
+    async def _dispatch_request(self, request):
+        """Encontra o handler para a rota e executa."""
+        handler, params = self.router.match(request.method, request.path)
+
+        if not handler:
+            return Response.error("Not Found", 404)
+
+        request.path_params = params
+
+        try:
+            result = await handler(request)
+
+            # Estrito: O handler DEVE retornar um objeto Response
+            if not isinstance(result, Response):
+                # Levanta exceção para ser capturada pelo bloco except abaixo
+                raise ValueError(f"Handler returned {type(result)}, expected Response")
+            return result
+
+        except Exception as e:
+            sys.print_exception(e)
+            self.logger.log(f"Handler Error: {e}", "ERROR")
+            return Response.error("Internal Server Error", 500)
 
     async def _handle_request(self, reader, writer):
         if self.conns >= self.max_conns:
             writer.close()
             return
-
         self.conns += 1
         addr = writer.get_extra_info("peername")
 
@@ -134,80 +149,20 @@ class MicroServer:
                 headers.get("upgrade", "").lower() == "websocket"
                 and path in self.ws_routes
             ):
-                websocket = WebSocket(reader, writer)
-                if not await websocket.accept(headers):
-                    await self._send_response(
-                        writer,
-                        Response(
-                            "Bad WebSocket handshake", 400, content_type="text/plain"
-                        ),
-                    )
-                    return
-
-                self.logger.log(f"WS Connect: {path}")
-                try:
-                    await self.ws_routes[path](websocket)
-                except Exception as e:
-                    self.logger.log(f"WS Error: {e}", "ERROR")
+                await self._handle_websocket(reader, writer, path, headers)
                 return
 
-            content_length_header = headers.get("content-length")
-            try:
-                content_length = int(content_length_header) if content_length_header else 0
-            except ValueError:
-                await self._send_response(
-                    writer,
-                    Response("Invalid Content-Length", 400, content_type="text/plain"),
-                )
+            request = await self._create_request(
+                reader, writer, method, path, headers, addr
+            )
+            if not request:
                 return
 
-            body = None
-            if content_length > 0:
-                max_body = self.config.get("max_body_size", _DEFAULT_MAX_BODY_SIZE)
-                if content_length > max_body:
-                    await self._send_response(
-                        writer,
-                        Response("Payload Too Large", 413, content_type="text/plain"),
-                    )
-                    return
-                body = await reader.read(content_length)
+            # Pipeline Execution
+            handler = self._build_pipeline()
+            response = await handler(request)
 
-            request = Request(method, path, headers, addr[0])
-            request.body = body
-
-            async def dispatch(request):
-                handler, params = self.router.match(request.method, request.path)
-
-                if handler is None:
-                    return Response('{"error": "Not Found"}', 404)
-
-                if params is not None:
-                    request.path_params = params
-
-                result = await handler(request)
-                if isinstance(result, Response):
-                    return result
-                if isinstance(result, (dict, list)):
-                    return Response(json.dumps(result))
-                if self._is_streaming_body(result):
-                    return Response(result)
-                return Response(str(result), content_type="text/html")
-
-            handler_chain = dispatch
-            for middleware in reversed(self.middlewares):
-                middleware_ref = middleware
-                next_handler = handler_chain
-
-                async def handler_chain(request, current_middleware=middleware_ref, next_call=next_handler):
-                    return await current_middleware(request, next_call)
-
-            try:
-                response = await handler_chain(request)
-            except Exception as e:
-                sys.print_exception(e)
-                self.logger.log(f"Handler Error: {e}", "ERROR")
-                response = Response('{"error": "Internal Error"}', 500)
-
+            # Sending Response
             await self._send_response(writer, response)
 
         except Exception as e:
@@ -218,8 +173,47 @@ class MicroServer:
                 await writer.drain()
                 writer.close()
                 await writer.wait_closed()
-            except:
+            except Exception:
                 pass
+
+    async def _handle_websocket(self, reader, writer, path, headers):
+        websocket = WebSocket(reader, writer)
+        if not await websocket.accept(headers):
+            await self._send_response(
+                writer, Response.plain("Bad WebSocket handshake", 400)
+            )
+            return
+
+        self.logger.log(f"WS Connect: {path}")
+        try:
+            await self.ws_routes[path](websocket)
+        except Exception as e:
+            self.logger.log(f"WS Error: {e}", "ERROR")
+
+    async def _create_request(self, reader, writer, method, path, headers, addr):
+        content_length_header = headers.get("content-length")
+        try:
+            content_length = int(content_length_header) if content_length_header else 0
+        except ValueError:
+            await self._send_response(
+                writer,
+                Response.plain("Invalid Content-Length", 400),
+            )
+            return None
+
+        body = None
+        if content_length > 0:
+            if content_length > self.max_body_size:
+                await self._send_response(
+                    writer,
+                    Response.plain("Payload Too Large", 413),
+                )
+                return None
+            body = await reader.read(content_length)
+
+        request = Request(method, path, headers, addr[0])
+        request.body = body
+        return request
 
     async def _send_response(self, writer, response):
         reason = self._reason_phrase(response.status)
@@ -266,16 +260,16 @@ class MicroServer:
         self.logger.log(f"Server started on port {self.port}")
         return await asyncio.start_server(self._handle_request, "0.0.0.0", self.port)
 
-    async def run(self, host="0.0.0.0", port=None):
+    async def run(self, host: str = "0.0.0.0", port: int = None):
         if port is not None:
             self.port = port
         self.logger.log(f"Server started on port {self.port}")
         return await asyncio.start_server(self._handle_request, host, self.port)
 
-    def _reason_phrase(self, status):
+    def _reason_phrase(self, status: int) -> str:
         return _PHRASES.get(status, "")
 
-    def _is_streaming_body(self, body):
+    def _is_streaming_body(self, body) -> bool:
         if body is None:
             return False
         if hasattr(body, "__aiter__"):
@@ -285,6 +279,3 @@ class MicroServer:
         if hasattr(body, "__iter__") and not isinstance(body, (bytes, bytearray, str)):
             return True
         return False
-
-
-class MicroServer:
