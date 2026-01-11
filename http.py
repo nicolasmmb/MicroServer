@@ -3,7 +3,7 @@ from utils import unquote
 
 
 class Request:
-    __slots__ = ("method", "path", "headers", "query_params", "body", "ip", "_json")
+    __slots__ = ("method", "path", "headers", "query_params", "body", "ip", "_json", "path_params")
 
     def __init__(self, method, path, headers, ip):
         self.method = method
@@ -11,14 +11,15 @@ class Request:
         self.ip = ip
         self.body = None
         self._json = None
+        self.path_params = {}
 
         if "?" in path:
-            self.path, qs = path.split("?", 1)
+            self.path, query_string = path.split("?", 1)
             self.query_params = {}
-            for pair in qs.split("&"):
+            for pair in query_string.split("&"):
                 if "=" in pair:
-                    k, v = pair.split("=", 1)
-                    self.query_params[unquote(k)] = unquote(v)
+                    key, value = pair.split("=", 1)
+                    self.query_params[unquote(key)] = unquote(value)
                 elif pair:
                     self.query_params[unquote(pair)] = ""
         else:

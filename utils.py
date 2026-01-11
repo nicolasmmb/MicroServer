@@ -1,8 +1,10 @@
 import os
 import time
 
+from micropython import const
+
 # Constantes compartilhadas
-CHUNK_SIZE = 512
+CHUNK_SIZE = const(512)
 
 
 class Logger:

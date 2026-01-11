@@ -10,22 +10,22 @@ class CORSMiddleware:
         self.headers = headers
         self.allow_credentials = allow_credentials
 
-    async def __call__(self, req, next_handler):
-        if req.method == "OPTIONS":
-            resp = Response("", 204)
-            self._add_headers(resp)
-            return resp
+    async def __call__(self, request, next_handler):
+        if request.method == "OPTIONS":
+            response = Response("", 204)
+            self._add_headers(response)
+            return response
 
-        response = await next_handler(req)
+        response = await next_handler(request)
         self._add_headers(response)
         return response
 
-    def _add_headers(self, resp):
-        resp.add_header("Access-Control-Allow-Origin", self.origins)
-        resp.add_header("Access-Control-Allow-Methods", self.methods)
-        resp.add_header("Access-Control-Allow-Headers", self.headers)
+    def _add_headers(self, response):
+        response.add_header("Access-Control-Allow-Origin", self.origins)
+        response.add_header("Access-Control-Allow-Methods", self.methods)
+        response.add_header("Access-Control-Allow-Headers", self.headers)
         if self.allow_credentials:
-            resp.add_header("Access-Control-Allow-Credentials", "true")
+            response.add_header("Access-Control-Allow-Credentials", "true")
 
 
 class LoggingMiddleware:
@@ -47,18 +47,18 @@ class LoggingMiddleware:
         else:
             return f"{us / 3600000000:.2f}h"
 
-    async def __call__(self, req, next_handler):
-        t0 = time.ticks_us()
-        response = await next_handler(req)
-        dt_us = time.ticks_diff(time.ticks_us(), t0)
-        time_str = self._fmt_duration(dt_us)
+    async def __call__(self, request, next_handler):
+        start_time = time.ticks_us()
+        response = await next_handler(request)
+        duration_us = time.ticks_diff(time.ticks_us(), start_time)
+        time_str = self._fmt_duration(duration_us)
 
-        t = time.localtime()
+        time_struct = time.localtime()
         timestamp = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:{:02d}".format(
-            t[2], t[1], t[0], t[3], t[4], t[5]
+            time_struct[2], time_struct[1], time_struct[0], time_struct[3], time_struct[4], time_struct[5]
         )
 
-        log_msg = f"{timestamp} | {req.ip} | {req.method} {req.path} | {response.status} | {time_str}"
+        log_msg = f"{timestamp} | {request.ip} | {request.method} {request.path} | {response.status} | {time_str}"
 
         self.logger.log(log_msg)
         return response
