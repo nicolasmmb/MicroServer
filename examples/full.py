@@ -45,7 +45,9 @@ app.add_middleware(CORSMiddleware(origins="*", methods="*"))
 
 @app.get("/")
 async def index(req):
-    return {"status": "online", "system": "ESP32", "memory_free": gc.mem_free()}
+    return Response.json(
+        {"status": "online", "system": "ESP32", "memory_free": gc.mem_free()}
+    )
 
 
 @app.get("/gc")
@@ -54,7 +56,7 @@ async def run_gc(req):
     before = gc.mem_free()
     gc.collect()
     after = gc.mem_free()
-    return {"freed": after - before, "current_free": after}
+    return Response.json({"freed": after - before, "current_free": after})
 
 
 @app.post("/led")
@@ -71,7 +73,7 @@ async def led_control(req):
         pin = machine.Pin(LED_PIN, machine.Pin.OUT)
         value = 1 if state in (1, True, "on") else 0
         pin.value(value)
-        return {"led": "on" if value else "off"}
+        return Response.json({"led": "on" if value else "off"})
     except Exception as e:
         return Response.error(f"Hardware error: {str(e)}", 500)
 
@@ -109,7 +111,7 @@ async def main():
     # 2. Start Server
     print("Starting server...")
     # Run the server loop
-    server_task = asyncio.create_task(app.run())
+    asyncio.create_task(app.run())
 
     # 3. Request Loop for periodic tasks (e.g. status report, cleanup)
     while True:

@@ -9,7 +9,7 @@ app = MicroServer(port=80)
 @app.get("/")
 async def hello(req):
     """Simple Hello World endpoint."""
-    return {"message": "Hello from MicroServer"}
+    return Response.json({"message": "Hello from MicroServer"})
 
 
 @app.post("/echo")
@@ -19,7 +19,7 @@ async def echo(req):
         return Response.error("Empty body", 400)
 
     # Return raw body as plain text
-    return Response(req.body, content_type="text/plain")
+    return Response.plain(req.body.decode() if req.body else "")
 
 
 @app.get("/stream")

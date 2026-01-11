@@ -25,7 +25,7 @@ app.add_middleware(
 @app.get("/status")
 async def status(req):
     """Check server status and client IP."""
-    return {"ok": True, "ip": req.ip}
+    return Response.json({"ok": True, "ip": req.ip})
 
 
 @app.post("/sum")
@@ -37,7 +37,7 @@ async def sum_numbers(req):
     try:
         a = float(data.get("a", 0))
         b = float(data.get("b", 0))
-        return {"result": a + b}
+        return Response.json({"result": a + b})
     except (ValueError, TypeError):
         return Response.error("Invalid numbers provided", 400)
 
@@ -66,6 +66,7 @@ async def stream_file(req):
 # Ensure the directory exists on your device
 app.mount_static("/static", "/flash/www")
 app.mount_static("/libs", "/flash/libs")
+
 
 async def main():
     print("Starting Medium Example Server...")
