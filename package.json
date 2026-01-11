@@ -29,6 +29,10 @@
         [
             "main.py",
             "github:nicolasmmb/MicroServer/main.py"
+        ],
+        [
+            "routing.py",
+            "github:nicolasmmb/MicroServer/routing.py"
         ]
     ]
 }
