@@ -169,6 +169,13 @@ class MicroServer:
         except asyncio.TimeoutError:
             # Normal behavior for keep-alive/pre-opened connections that don't send data
             pass
+        except OSError as e:
+            # Ignora erros de desconexão comuns (EPIPE=32, ECONNRESET=104)
+            if e.args[0] in (32, 104):
+                self.logger.log(f"Connection closed by peer: {e}", "DEBUG")
+            else:
+                sys.print_exception(e)
+                self.logger.log(f"Server Error: {repr(e)}", "ERROR")
         except Exception as e:
             sys.print_exception(e)
             self.logger.log(f"Server Error: {repr(e)}", "ERROR")
