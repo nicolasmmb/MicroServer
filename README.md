@@ -38,17 +38,18 @@ Save this as `main.py`:
 ```python
 import uasyncio as asyncio
 from microserver import MicroServer
+from http import Response
 
 app = MicroServer(port=80)
 
 @app.get("/")
 async def index(req):
-    return {"message": "Hello from MicroServer"}
+    return Response.json({"message": "Hello from MicroServer"})
 
 @app.post("/data")
 async def receive(req):
     data = req.json
-    return {"status": "received", "data": data}
+    return Response.json({"status": "received", "data": data})
 
 asyncio.run(app.run())
 ```
@@ -63,13 +64,13 @@ MicroServer supports common HTTP methods and dynamic parameters.
 # Static Route
 @app.get("/status")
 async def status(req):
-    return "OK"
+    return Response.plain("OK")
 
 # Dynamic Route (captures 'user_id')
 @app.get("/users/<user_id>")
 async def get_user(req):
     uid = req.path_params.get("user_id")
-    return {"id": uid}
+    return Response.json({"id": uid})
 ```
 
 ### Middleware
@@ -108,26 +109,40 @@ async def ws_handler(ws):
 
 ### Response Objects
 
-Valid return types from handlers:
-1.  **Dict/List**: Automatically serialized to JSON.
-2.  **String**: Returned as `text/html`.
-3.  **`Response` Object**: For full control.
+Use the static factory methods on `Response` for explicit content types:
 
 ```python
 from http import Response
 
-# Custom Status Code and Headers
-return Response(
-    body="Unauthorized", 
-    status=401, 
-    content_type="text/plain"
-)
+# JSON (Content-Type: application/json)
+return Response.json({"key": "value"})
 
-# Stream Generator (save RAM on large payloads)
-def huge_data():
-    for i in range(1000):
-        yield f"Line {i}\n"
-return Response.stream(huge_data())
+# HTML (Content-Type: text/html)
+return Response.html("<h1>Hello</h1>")
+
+# Plain Text (Content-Type: text/plain)
+return Response.plain("Simple text")
+
+# Error (JSON with status code)
+return Response.error("Something went wrong", 400)
+
+# Custom Status Code and Headers
+return Response.json({"error": "Auth failed"}, status=401)
+```
+
+### Streaming
+
+For large payloads, use `Response.stream` with a generator to save RAM.
+
+```python
+@app.get("/large-data")
+async def stream_data(req):
+    async def huge_data():
+        for i in range(1000):
+            yield f"Line {i}\n"
+            await asyncio.sleep(0.01)
+            
+    return Response.stream(huge_data())
 ```
 
 ### Serving Static Files

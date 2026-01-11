@@ -123,7 +123,6 @@ class MicroServer:
             return
         self.conns += 1
         addr = writer.get_extra_info("peername")
-        self.logger.log(f"New connection from {addr}", "DEBUG")
 
         try:
             line = await asyncio.wait_for(reader.readline(), _READLINE_TIMEOUT)
@@ -169,8 +168,7 @@ class MicroServer:
 
         except asyncio.TimeoutError:
             # Normal behavior for keep-alive/pre-opened connections that don't send data
-            # Log at DEBUG level to avoid noise, or omit if preferred.
-            self.logger.log("Client idle timeout", "DEBUG")
+            pass
         except Exception as e:
             sys.print_exception(e)
             self.logger.log(f"Server Error: {repr(e)}", "ERROR")
