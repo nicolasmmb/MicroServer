@@ -19,6 +19,8 @@ class MicroServer:
     def __init__(
         self, port: int = 80, logger: Logger = None, router=None, max_conns: int = 10
     ):
+        # NOTE: ESP32 standard builds often have a hard limit of ~10-16 sockets (LWIP).
+        # Setting max_conns > 10 might not work depending on the firmware/usage.
         self.port = port
         self.logger = logger or ConsoleLogger()
         self.router = router or Router()
@@ -176,6 +178,14 @@ class MicroServer:
             # Ignora erros de desconexão comuns (EPIPE=32, ECONNRESET=104)
             if e.args[0] in (32, 104):
                 self.logger.log(f"Connection closed by peer: {e}", "DEBUG")
+            elif e.args[0] == 23:  # EMFILE: Too many open files
+                self.logger.log(f"System limit reached (EMFILE): {e}", "WARNING")
+                try:
+                    await self._send_response(
+                        writer, Response.error("Service Unavailable", 503)
+                    )
+                except:
+                    pass
             else:
                 sys.print_exception(e)
                 self.logger.log(f"Server Error: {repr(e)}", "ERROR")
