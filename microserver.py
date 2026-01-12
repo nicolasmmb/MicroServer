@@ -7,6 +7,7 @@ from middleware import MiddlewarePipeline
 from websocket import WebSocket
 
 # Constantes compartilhadas
+import gc
 from micropython import const
 
 CHUNK_SIZE = const(512)
@@ -15,13 +16,15 @@ _HEADER_TIMEOUT = const(2)
 
 
 class MicroServer:
-    def __init__(self, port: int = 80, logger: Logger = None, router=None):
+    def __init__(
+        self, port: int = 80, logger: Logger = None, router=None, max_conns: int = 10
+    ):
         self.port = port
         self.logger = logger or ConsoleLogger()
         self.router = router or Router()
         self.middlewares = []
         self.conns = 0
-        self.max_conns = 10
+        self.max_conns = max_conns
         self.ws_routes = {}
         self.max_body_size = 1024 * 1024  # 1MB limit for safety
 
@@ -187,6 +190,7 @@ class MicroServer:
                 await writer.wait_closed()
             except Exception:
                 pass
+            gc.collect()
 
     async def _handle_websocket(self, reader, writer, path, headers):
         websocket = WebSocket(reader, writer)
