@@ -55,20 +55,33 @@ class _RouteTrie:
 
     def match(self, path: str):
         node = self.root
-        params = {}
-        for part in self._parts(path):
-            children = node.get("c")
+        params = None
+
+        if not path or path == "/":
+            parts = []
+        else:
+            if path[0] == "/":
+                path = path[1:]
+            if path.endswith("/"):
+                path = path[:-1]
+            parts = path.split("/") if path else []
+
+        for part in parts:
+            children = node["c"]
             if part in children:
                 node = children[part]
-            elif node.get("p") is not None:
-                param_name = node.get("pn")
+            elif node["p"] is not None:
+                param_name = node["pn"]
                 if param_name is not None:
+                    if params is None:
+                        params = {}
                     params[param_name] = part
                 node = node["p"]
             else:
                 return None
-        if node.get("h"):
-            return node["h"], params
+
+        if node["h"]:
+            return node["h"], params or {}
         return None
 
     def _parts(self, path: str) -> list:

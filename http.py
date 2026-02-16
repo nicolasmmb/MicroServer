@@ -1,6 +1,6 @@
 import json
-from utils import unquote
 
+from utils import unquote
 
 _PHRASES = {
     # 1xx: Informational
@@ -99,12 +99,24 @@ class Request:
         if "?" in path:
             self.path, query_string = path.split("?", 1)
             self.query_params: dict = query_params or {}
-            for pair in query_string.split("&"):
+
+            start = 0
+            qlen = len(query_string)
+            while start < qlen:
+                end = query_string.find("&", start)
+                if end == -1:
+                    end = qlen
+
+                pair = query_string[start:end]
                 if "=" in pair:
-                    key, value = pair.split("=", 1)
-                    self.query_params[unquote(key)] = unquote(value)
+                    eq_pos = pair.find("=")
+                    key = unquote(pair[:eq_pos])
+                    value = unquote(pair[eq_pos + 1 :])
+                    self.query_params[key] = value
                 elif pair:
                     self.query_params[unquote(pair)] = ""
+
+                start = end + 1
         else:
             self.path: str = path
             self.query_params: dict = query_params or {}
@@ -164,3 +176,40 @@ class Response:
     def stream(cls, generator, content_type: str = "text/plain") -> "Response":
         """Factory para respostas em streaming (generator)."""
         return cls(generator, status=200, content_type=content_type)
+
+    @classmethod
+    def sse(cls, generator) -> "Response":
+        """
+        Factory para Server-Sent Events (SSE).
+
+        SSE permite enviar atualizações em tempo real do servidor para o cliente
+        usando HTTP streaming. Ideal para dashboards, logs, e monitoramento.
+
+        Args:
+            generator: Async generator que yielda eventos SSE.
+                      Cada evento deve estar no formato: "data: {content}\\n\\n"
+
+        Returns:
+            Response: Response configurada para SSE
+
+        Example:
+            @app.get("/events")
+            async def events(req):
+                async def event_stream():
+                    while True:
+                        data = {"temperature": get_temp(), "time": time.time()}
+                        yield f"data: {json.dumps(data)}\\n\\n"
+                        await asyncio.sleep(1)
+
+                return Response.sse(event_stream())
+
+        Note:
+            - Cliente usa JavaScript: new EventSource('/events')
+            - Conexão permanece aberta (keep-alive)
+            - Reconexão automática pelo browser
+            - Formato: "data: content\\n\\n" (obrigatório 2x \\n)
+        """
+        response = cls(generator, status=200, content_type="text/event-stream")
+        response.add_header("Cache-Control", "no-cache")
+        response.add_header("X-Accel-Buffering", "no")  # Nginx compatibility
+        return response

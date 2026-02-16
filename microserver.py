@@ -410,13 +410,18 @@ class MicroServer:
         reason = self._reason_phrase(response.status)
         http_date = _format_http_date()
 
+        # Detect Server-Sent Events (SSE)
+        is_sse = response.content_type == "text/event-stream"
+
         writer.write(f"HTTP/1.1 {response.status} {reason}\r\n".encode())
         writer.write(f"Date: {http_date}\r\n".encode())
         writer.write(f"Server: {self.server_name}\r\n".encode())
 
-        if keep_alive:
+        # SSE requires keep-alive always
+        if is_sse or keep_alive:
             writer.write(b"Connection: keep-alive\r\n")
-            writer.write(f"Keep-Alive: timeout={self.keep_alive_timeout}, max={requests_remaining}\r\n".encode())
+            if not is_sse:  # SSE doesn't need Keep-Alive header (infinite stream)
+                writer.write(f"Keep-Alive: timeout={self.keep_alive_timeout}, max={requests_remaining}\r\n".encode())
         else:
             writer.write(b"Connection: close\r\n")
 
@@ -425,10 +430,36 @@ class MicroServer:
             writer.write(f"{key}: {value}\r\n".encode())
 
         if self._is_streaming_body(response.body):
-            await self._send_streaming_body(writer, response.body)
+            if is_sse:
+                # SSE uses raw streaming (não chunked)
+                await self._send_sse_body(writer, response.body)
+            else:
+                # Regular streaming usa chunked encoding
+                await self._send_streaming_body(writer, response.body)
         else:
             await self._send_payload(writer, response.body)
         await writer.drain()
+
+    async def _send_sse_body(self, writer, body):
+        """
+        Envia body para Server-Sent Events (SSE)
+        SSE não usa chunked encoding, envia raw data
+        """
+        writer.write(b"\r\n")  # Finalizar headers
+
+        gen = body
+        if hasattr(gen, "__aiter__"):
+            async for event in gen:
+                if isinstance(event, str):
+                    event = event.encode()
+                writer.write(event)
+                await writer.drain()  # Flush imediatamente para SSE
+        else:
+            for event in gen:
+                if isinstance(event, str):
+                    event = event.encode()
+                writer.write(event)
+                await writer.drain()
 
     async def _send_streaming_body(self, writer, body):
         writer.write(b"Transfer-Encoding: chunked\r\n\r\n")
